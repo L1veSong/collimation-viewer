@@ -1,0 +1,646 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>光轴校准查看器</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="光轴校准">
+<link rel="apple-touch-icon" href="AppIcon-180.png">
+<style>
+  :root{
+    --bg:#0f1216; --panel:#171c23; --line:#2a313a; --text:#e8edf2; --dim:#8b98a5; --accent:#3b82f6;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",Arial,sans-serif;display:flex;flex-direction:column;overflow:hidden}
+  header{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+  h1{font-size:15px;margin:0;font-weight:600}
+  .sub{color:var(--dim);font-size:12px}
+  .grow{flex:1}
+  button{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:7px 12px;font-size:13px;cursor:pointer}
+  button:hover{border-color:var(--accent)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.small{padding:4px 10px;font-size:12px}
+  main{flex:1;display:flex;min-height:0}
+  #stage{flex:1;position:relative;background:#000;min-width:0;overflow:hidden;cursor:grab}
+  #stage:active{cursor:grabbing}
+  #video{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);max-width:100%;max-height:100%}
+  #overlay{position:absolute;left:0;top:0;pointer-events:none}
+  #hint{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--dim);text-align:center;padding:20px;font-size:13px;line-height:1.9;pointer-events:none}
+  aside{width:318px;border-left:1px solid var(--line);padding:12px;overflow:auto;background:#12171d;flex-shrink:0}
+  fieldset{border:1px solid var(--line);border-radius:10px;margin:0 0 12px;padding:10px 12px}
+  legend{color:var(--dim);font-size:12px;padding:0 6px}
+  .row{display:flex;align-items:center;gap:8px;margin:7px 0}
+  .row label{flex:0 0 70px;color:var(--dim);font-size:12px}
+  .row input[type=range]{flex:1;min-width:0}
+  .val{flex:0 0 48px;text-align:right;font-variant-numeric:tabular-nums;color:var(--dim);font-size:12px}
+  select{max-width:100%;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:6px 8px;font-size:13px;flex:1;min-width:0}
+  input[type=color]{width:34px;height:24px;padding:0;border:1px solid var(--line);border-radius:6px;background:none;flex:0 0 auto}
+  .foot{padding:8px 14px;border-top:1px solid var(--line);color:var(--dim);font-size:12px}
+  .badge{display:inline-block;padding:2px 8px;border-radius:99px;background:var(--panel);border:1px solid var(--line);font-size:12px;color:var(--dim);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .hint-small{color:var(--dim);font-size:12px;margin:6px 0 0}
+</style>
+</head>
+<body>
+<header>
+  <h1>光轴校准查看器</h1>
+  <span class="sub">UVC 摄像头 · 三圈 / 十字线 / 偏心读数</span>
+  <span class="grow"></span>
+  <select id="camSelect" disabled><option value="">（先开启摄像头）</option></select>
+  <button id="btnStart" class="primary">开启摄像头</button>
+  <button id="btnFull">全屏</button>
+  <button id="btnShot">存图</button>
+</header>
+<main>
+  <div id="stage">
+    <video id="video" playsinline></video>
+    <canvas id="overlay"></canvas>
+    <div id="hint">点「开启摄像头」并允许权限。<br>设备出现在下拉列表且出现画面，即说明它是标准 UVC 摄像头。</div>
+  </div>
+  <aside>
+    <fieldset>
+      <legend>状态</legend>
+      <div class="row"><span class="badge" id="devInfo">未连接</span></div>
+      <div class="row"><span class="badge" id="eccInfo">偏心：待开启</span></div>
+      <div class="row"><button class="small" id="btnReset">恢复默认设置</button></div>
+      <p class="hint-small">按住画面拖动可移动叠加层中心；所有调整会自动保存——想回到初始参数，点上方「恢复默认设置」。</p>
+    </fieldset>
+    <fieldset>
+      <legend>圆圈 · 红 / 紫 / 绿（半径 = % 画面宽）</legend>
+      <div class="row"><input type="checkbox" id="c1on" checked/><input type="color" id="c1color" value="#e62d2d"/><input type="range" id="c1r" min="1" max="60" step="0.1" value="8"/><span class="val" id="c1v">8%</span></div>
+      <div class="row"><input type="checkbox" id="c2on" checked/><input type="color" id="c2color" value="#9b41d2"/><input type="range" id="c2r" min="1" max="60" step="0.1" value="13"/><span class="val" id="c2v">13%</span></div>
+      <div class="row"><input type="checkbox" id="c3on" checked/><input type="color" id="c3color" value="#28be4b"/><input type="range" id="c3r" min="1" max="60" step="0.1" value="19"/><span class="val" id="c3v">19%</span></div>
+    </fieldset>
+    <fieldset>
+      <legend>十字线</legend>
+      <div class="row"><input type="checkbox" id="cron" checked/><input type="color" id="crcolor" value="#ff69b4"/><input type="range" id="crw" min="1" max="8" step="0.5" value="2"/><span class="val" id="crwv">2px</span></div>
+      <div class="row"><label>臂长</label><input type="range" id="crArm" min="0" max="100" step="1" value="0"/><span class="val" id="crArmv">贯穿</span></div>
+      <div class="row"><label>旋转</label><input type="range" id="crRot" min="0" max="360" step="0.1" value="0"/><span class="val" id="crRotv">0°</span></div>
+    </fieldset>
+    <fieldset>
+      <legend>中心偏移（% 画面）</legend>
+      <div class="row"><label>水平 X</label><input type="range" id="offx" min="-50" max="50" step="0.1" value="0"/><span class="val" id="offxv">0</span></div>
+      <div class="row"><label>垂直 Y</label><input type="range" id="offy" min="-50" max="50" step="0.1" value="0"/><span class="val" id="offyv">0</span></div>
+    </fieldset>
+    <fieldset>
+      <legend>偏心像素</legend>
+      <div class="row"><label>显示标记</label><input type="checkbox" id="eccOn" checked/></div>
+      <p class="hint-small">自动跟踪画面亮斑重心相对画面中心的偏移（像素），读数显示在顶部状态栏，并在画面上标出：青色=中心，橙线=偏差方向，红点=亮斑重心。</p>
+    </fieldset>
+    <fieldset>
+      <legend>画面</legend>
+      <div class="row"><button class="small" id="btnRot">旋转 90°</button><button class="small" id="btnFlip">水平镜像</button></div>
+      <div class="row"><label>分辨率</label><select id="resSelect" disabled><option value="auto">自动（最高）</option></select></div>
+      <div class="row"><label>变焦</label><input type="range" id="zoom" min="1" max="3" step="0.05" value="1"/><span class="val" id="zoomv">1.00×</span></div>
+      <div class="row"><label>亮度</label><input type="range" id="bright" min="0.3" max="2" step="0.01" value="1"/><span class="val" id="brightv">1.00</span></div>
+      <div class="row"><label>对比度</label><input type="range" id="contrast" min="0.3" max="2" step="0.01" value="1"/><span class="val" id="contrastv">1.00</span></div>
+    </fieldset>
+    <fieldset>
+      <legend>相机硬件参数</legend>
+      <div id="hwBox"><p class="hint-small">开启摄像头后自动识别设备支持的可调参数。</p></div>
+    </fieldset>
+  </aside>
+</main>
+<div class="foot">用于反射望远镜光轴校准：三圈分别对准调焦筒 / 副镜 / 主镜等参考结构；十字线可旋转、臂长可调；偏心读数自动跟踪亮斑重心。仅本机运行，不联网。</div>
+<script>
+(function(){
+'use strict';
+var $ = function(id){ return document.getElementById(id); };
+var video = $('video'), overlay = $('overlay'), stage = $('stage'), hint = $('hint');
+var ctx = overlay.getContext('2d');
+var stream = null;
+var dpr = window.devicePixelRatio || 1;
+var KEY = 'ocal-mac-tool-v2';
+
+/* ---------------- 状态 ---------------- */
+function freshState(){
+  return {
+    circles: [
+      {on:true, color:'#e62d2d', r:8},
+      {on:true, color:'#9b41d2', r:13},
+      {on:true, color:'#28be4b', r:19}
+    ],
+    cross: {on:true, color:'#ff69b4', w:2, arm:0, rot:0},
+    off: {x:0, y:0},
+    view: {rot:0, flip:false, bright:1, contrast:1, zoom:1},
+    ecc: {on:true}
+  };
+}
+var state = freshState();
+
+function save(){
+  try{ localStorage.setItem(KEY, JSON.stringify(state)); }catch(e){}
+}
+function load(){
+  try{
+    var s = localStorage.getItem(KEY);
+    if(!s){ return; }
+    var o = JSON.parse(s);
+    if(!o || !o.circles || !o.cross || !o.off || !o.view){ return; }
+    state = o;
+    if(typeof state.cross.arm !== 'number'){ state.cross.arm = 0; }
+    if(typeof state.cross.rot !== 'number'){ state.cross.rot = 0; }
+    if(typeof state.view.zoom !== 'number' || state.view.zoom < 1){ state.view.zoom = 1; }
+    if(!state.ecc){ state.ecc = {on:true}; }
+  }catch(e){}
+}
+function clamp(v, a, b){ return v < a ? a : (v > b ? b : v); }
+
+/* ---------------- 偏心像素（采样与读数） ---------------- */
+var ecc = {ok:false, dx:0, dy:0};
+var eccCv = document.createElement('canvas');
+var eccCx = null;
+try{ eccCx = eccCv.getContext('2d', {willReadFrequently:true}); }catch(e){ eccCx = eccCv.getContext('2d'); }
+
+function updEccInfo(){
+  var el = $('eccInfo');
+  if(!stream){ el.textContent = '偏心：待开启'; return; }
+  if(!state.ecc.on){ el.textContent = '偏心：已关闭'; return; }
+  if(!ecc.ok){ el.textContent = '偏心：对比度不足或未取样'; return; }
+  var f = function(v){ return (v > 0 ? '+' : '') + v; };
+  el.textContent = '偏心 Δx=' + f(ecc.dx) + ' Δy=' + f(ecc.dy) + ' px';
+}
+
+function sampleEcc(){
+  if(!state.ecc.on){ return; }
+  if(!stream || !video.videoWidth){ ecc.ok = false; updEccInfo(); return; }
+  var vw = video.videoWidth, vh = video.videoHeight;
+  var sw = 160;
+  var sh = Math.max(8, Math.round(sw * vh / vw));
+  if(eccCv.width !== sw || eccCv.height !== sh){ eccCv.width = sw; eccCv.height = sh; }
+  var d;
+  try{
+    eccCx.drawImage(video, 0, 0, sw, sh);
+    d = eccCx.getImageData(0, 0, sw, sh).data;
+  }catch(e){ ecc.ok = false; updEccInfo(); return; }
+  var n = sw * sh, i, o, L, sumL = 0, sumL2 = 0;
+  for(i = 0; i < n; i++){
+    o = i * 4;
+    L = 0.299 * d[o] + 0.587 * d[o+1] + 0.114 * d[o+2];
+    sumL += L; sumL2 += L * L;
+  }
+  var mean = sumL / n;
+  var std = Math.sqrt(Math.max(0, sumL2 / n - mean * mean));
+  var thr = mean + std;
+  var sumw = 0, sx = 0, sy = 0, cnt = 0;
+  for(i = 0; i < n; i++){
+    o = i * 4;
+    L = 0.299 * d[o] + 0.587 * d[o+1] + 0.114 * d[o+2];
+    if(L > thr){
+      var wt = L - thr;
+      sumw += wt;
+      sx += wt * (i % sw);
+      sy += wt * Math.floor(i / sw);
+      cnt++;
+    }
+  }
+  if(cnt < 10 || sumw <= 0){ ecc.ok = false; updEccInfo(); return; }
+  var scale = vw / sw;
+  ecc.dx = Math.round((sx / sumw - sw / 2) * scale);
+  ecc.dy = Math.round((sy / sumw - sh / 2) * scale);
+  ecc.ok = true;
+  updEccInfo();
+}
+
+/* 叠加层坐标 → 与画面旋转/镜像保持一致 */
+function mapDelta(dx, dy){
+  var rot = ((state.view.rot % 360) + 360) % 360;
+  if(state.view.flip){ dx = -dx; }
+  var tx = dx, ty = dy;
+  if(rot === 90){ tx = -dy; ty = dx; }
+  else if(rot === 180){ tx = -dx; ty = -dy; }
+  else if(rot === 270){ tx = dy; ty = -dx; }
+  return {dx: tx, dy: ty};
+}
+
+/* ---------------- 视图与叠加绘制 ---------------- */
+function applyView(){
+  var t = 'translate(-50%,-50%)';
+  if(state.view.rot){ t += ' rotate(' + state.view.rot + 'deg)'; }
+  if(state.view.flip){ t += ' scaleX(-1)'; }
+  var zz = state.view.zoom || 1;
+  if(zz !== 1){ t += ' scale(' + zz + ')'; }
+  video.style.transform = t;
+  video.style.filter = 'brightness(' + state.view.bright + ') contrast(' + state.view.contrast + ')';
+}
+
+function fitOverlay(){
+  var r = video.getBoundingClientRect();
+  var s = stage.getBoundingClientRect();
+  overlay.style.left = (r.left - s.left) + 'px';
+  overlay.style.top  = (r.top  - s.top ) + 'px';
+  overlay.style.width  = r.width + 'px';
+  overlay.style.height = r.height + 'px';
+  overlay.width  = Math.max(1, Math.round(r.width  * dpr));
+  overlay.height = Math.max(1, Math.round(r.height * dpr));
+  draw();
+}
+
+function drawOverlay(c, w, h){
+  var cx = w/2 + state.off.x/100*w;
+  var cy = h/2 + state.off.y/100*h;
+  var i, ci;
+  for(i = 0; i < 3; i++){
+    ci = state.circles[i];
+    if(!ci.on){ continue; }
+    c.beginPath();
+    c.arc(cx, cy, Math.max(1, ci.r/100*w), 0, Math.PI*2);
+    c.strokeStyle = ci.color;
+    c.lineWidth = Math.max(1, w/400);
+    c.stroke();
+  }
+  if(state.cross.on){
+    var cr = state.cross;
+    var rad = cr.rot * Math.PI / 180;
+    var cA = Math.cos(rad), sA = Math.sin(rad);
+    var L;
+    if(cr.arm > 0){ L = cr.arm / 100 * Math.min(w, h); }
+    else { L = Math.sqrt(w*w + h*h); }
+    c.strokeStyle = cr.color;
+    c.lineWidth = Math.max(1, cr.w);
+    c.beginPath();
+    c.moveTo(cx - cA*L, cy - sA*L); c.lineTo(cx + cA*L, cy + sA*L);
+    c.moveTo(cx + sA*L, cy - cA*L); c.lineTo(cx - sA*L, cy + cA*L);
+    c.stroke();
+    c.beginPath();
+    c.arc(cx, cy, Math.max(1.5, w/300), 0, Math.PI*2);
+    c.fillStyle = cr.color;
+    c.fill();
+  }
+  /* 偏心标记：青=中心，橙线=方向，红点=重心 */
+  if(state.ecc.on && ecc.ok && video.videoWidth){
+    var rotNow = ((state.view.rot % 360) + 360) % 360;
+    var vw0 = video.videoWidth, vh0 = video.videoHeight;
+    var dispW = (rotNow === 90 || rotNow === 270) ? vh0 : vw0;
+    var m = mapDelta(ecc.dx, ecc.dy);
+    var sp = w / dispW;
+    var ex = cx + m.dx * sp;
+    var ey = cy + m.dy * sp;
+    var as = Math.max(6, Math.min(w, h) / 40); if(as > 24){ as = 24; }
+    c.strokeStyle = '#00ffff';
+    c.lineWidth = Math.max(1, Math.min(3, Math.min(w, h) / 256 + 1));
+    c.beginPath();
+    c.moveTo(cx - as, cy); c.lineTo(cx + as, cy);
+    c.moveTo(cx, cy - as); c.lineTo(cx, cy + as);
+    c.stroke();
+    c.strokeStyle = '#ffc800';
+    c.lineWidth = Math.max(1, Math.min(4, Math.min(w, h) / 200));
+    c.beginPath();
+    c.moveTo(cx, cy); c.lineTo(ex, ey);
+    c.stroke();
+    var rr = Math.max(3, Math.min(10, Math.min(w, h) / 80));
+    c.beginPath();
+    c.arc(ex, ey, rr, 0, Math.PI*2);
+    c.fillStyle = '#ff5050';
+    c.fill();
+  }
+}
+
+function draw(){
+  var w = overlay.width / dpr, h = overlay.height / dpr;
+  if(!w || !h){ return; }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  drawOverlay(ctx, w, h);
+}
+
+function loop(){
+  if(stream && video.videoWidth){ draw(); }
+  requestAnimationFrame(loop);
+}
+
+/* ---------------- 摄像头 ---------------- */
+function gotStream(s){
+  stream = s;
+  video.srcObject = s;
+  var p = video.play();
+  if(p && p.catch){ p.catch(function(){}); }
+  hint.style.display = 'none';
+  refreshList();
+  buildResList();
+  buildHwControls();
+  applyView();
+  updEccInfo();
+}
+
+function start(deviceId){
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    alert('当前浏览器不支持摄像头 API，请改用 Chrome 或 Safari。');
+    return;
+  }
+  var constraints = { audio:false, video: deviceId ? { deviceId: { exact: deviceId } } : { width: { ideal: 4000 }, height: { ideal: 3000 } } };
+  navigator.mediaDevices.getUserMedia(constraints).then(function(s){
+    if(stream){ stream.getTracks().forEach(function(t){ t.stop(); }); }
+    gotStream(s);
+  }).catch(function(err){
+    var ua = navigator.userAgent || '';
+    var isSafari = /Safari/.test(ua) && !/Chrome|Chromium|Edg/.test(ua);
+    var tips = '开启失败：' + err.name + ' ' + err.message + '\n\n请依次检查：\n1) 地址栏必须是 http://localhost:8771/ （不能直接双击 html 文件）\n';
+    if(isSafari){
+      tips += '2) Safari 权限：菜单栏「Safari」→「设置」→「网站」→「摄像头」，把 localhost 改为「允许」；或点地址栏左侧按钮 → 网站设置 → 摄像头 → 允许。改完刷新页面再点一次\n';
+    } else {
+      tips += '2) 弹窗里点「允许」；若之前拒绝过：点地址栏左侧图标 → 摄像头 → 允许，然后刷新再试\n';
+    }
+    tips += '3) 设备已插好（可先用系统「相机」App 确认能出画面）';
+    alert(tips);
+  });
+}
+
+function refreshList(){
+  navigator.mediaDevices.enumerateDevices().then(function(devs){
+    var sel = $('camSelect');
+    var cams = devs.filter(function(d){ return d.kind === 'videoinput'; });
+    sel.innerHTML = '';
+    cams.forEach(function(d, idx){
+      var op = document.createElement('option');
+      op.value = d.deviceId;
+      op.textContent = d.label || ('摄像头 ' + (idx + 1));
+      sel.appendChild(op);
+    });
+    sel.disabled = cams.length === 0;
+    if(stream){
+      var tr = stream.getVideoTracks()[0];
+      var st = tr ? tr.getSettings() : null;
+      if(st && st.deviceId){ sel.value = st.deviceId; }
+    }
+  }).catch(function(){});
+}
+
+/* ---------------- 分辨率 ---------------- */
+var RES_PRESETS = [[640,480],[960,540],[1280,720],[1920,1080],[2048,1536],[2592,1944],[3264,2448],[3840,2160],[4000,3000]];
+function buildResList(){
+  var sel = $('resSelect');
+  sel.innerHTML = '';
+  var op0 = document.createElement('option');
+  op0.value = 'auto'; op0.textContent = '自动（最高）';
+  sel.appendChild(op0);
+  var tr = stream ? stream.getVideoTracks()[0] : null;
+  var maxW = 0, maxH = 0;
+  try{
+    var caps = (tr && tr.getCapabilities) ? tr.getCapabilities() : null;
+    if(caps && caps.width && caps.height){ maxW = caps.width.max || 0; maxH = caps.height.max || 0; }
+  }catch(e){}
+  for(var i = 0; i < RES_PRESETS.length; i++){
+    var r = RES_PRESETS[i];
+    if(maxW && maxH && (r[0] > maxW || r[1] > maxH)){ continue; }
+    var op = document.createElement('option');
+    op.value = r[0] + 'x' + r[1];
+    op.textContent = r[0] + '×' + r[1];
+    sel.appendChild(op);
+  }
+  sel.disabled = !tr;
+}
+function applyResolution(v){
+  var tr = stream ? stream.getVideoTracks()[0] : null;
+  if(!tr){ return; }
+  var c;
+  if(v === 'auto'){
+    c = { width: { ideal: 4000 }, height: { ideal: 3000 } };
+  }else{
+    var p = v.split('x');
+    c = { width: { ideal: parseInt(p[0], 10) }, height: { ideal: parseInt(p[1], 10) } };
+  }
+  tr.applyConstraints(c).catch(function(e){
+    alert('切换分辨率失败：' + (e && e.name ? e.name : e));
+  });
+}
+
+/* ---------------- 相机硬件参数 ---------------- */
+var HW_KEYS = [
+  ['brightness', '亮度'],
+  ['contrast', '对比度'],
+  ['saturation', '饱和度'],
+  ['sharpness', '锐度'],
+  ['gamma', '伽马'],
+  ['gain', '增益'],
+  ['exposureTime', '曝光时间'],
+  ['focusDistance', '对焦距离'],
+  ['zoom', '变焦']
+];
+function fmtHw(v, stp){
+  v = Number(v);
+  if(stp >= 1){ return String(Math.round(v)); }
+  if(stp >= 0.1){ return v.toFixed(1); }
+  return v.toFixed(2);
+}
+function applyHw(k, v){
+  var tr = stream ? stream.getVideoTracks()[0] : null;
+  if(!tr || !tr.applyConstraints){ return; }
+  var c = {};
+  c[k] = v;
+  var p = null;
+  try{ p = tr.applyConstraints({ advanced: [c] }); }catch(e){ p = null; }
+  if(p && p.catch){
+    p.catch(function(){
+      try{ tr.applyConstraints(c).catch(function(){}); }catch(e){}
+    });
+  }
+}
+function buildHwControls(){
+  var box = $('hwBox');
+  box.innerHTML = '';
+  var tr = stream ? stream.getVideoTracks()[0] : null;
+  if(!tr || !tr.getCapabilities){
+    box.innerHTML = '<p class="hint-small">此设备不支持硬件参数调节。</p>';
+    return;
+  }
+  var caps = {};
+  var st = {};
+  try{ caps = tr.getCapabilities() || {}; }catch(e){ caps = {}; }
+  try{ st = tr.getSettings() || {}; }catch(e){ st = {}; }
+  var any = false;
+  for(var i = 0; i < HW_KEYS.length; i++){
+    (function(k, label){
+      var c = caps[k];
+      if(!c || typeof c.min !== 'number' || typeof c.max !== 'number'){ return; }
+      any = true;
+      var row = document.createElement('div');
+      row.className = 'row';
+      var lab = document.createElement('label');
+      lab.textContent = label;
+      var rg = document.createElement('input');
+      rg.type = 'range';
+      rg.min = c.min; rg.max = c.max;
+      rg.step = (c.step && c.step > 0) ? c.step : 0.01;
+      var cur = (typeof st[k] === 'number') ? st[k] : c.min;
+      rg.value = cur;
+      var vv = document.createElement('span');
+      vv.className = 'val';
+      vv.textContent = fmtHw(cur, rg.step);
+      rg.addEventListener('input', function(){
+        var v = parseFloat(rg.value);
+        applyHw(k, v);
+        vv.textContent = fmtHw(v, rg.step);
+      });
+      row.appendChild(lab); row.appendChild(rg); row.appendChild(vv);
+      box.appendChild(row);
+    })(HW_KEYS[i][0], HW_KEYS[i][1]);
+  }
+  if(!any){
+    box.innerHTML = '<p class="hint-small">此设备未上报可调节参数（部分摄像头需在系统或自带软件中调节）。</p>';
+  }
+}
+
+/* ---------------- 控件 ---------------- */
+function setCtlValues(){
+  var i, on, col, rg, vv;
+  for(i = 0; i < 3; i++){
+    on  = $('c' + (i+1) + 'on');
+    col = $('c' + (i+1) + 'color');
+    rg  = $('c' + (i+1) + 'r');
+    vv  = $('c' + (i+1) + 'v');
+    on.checked = state.circles[i].on;
+    col.value = state.circles[i].color;
+    rg.value = state.circles[i].r;
+    vv.textContent = state.circles[i].r + '%';
+  }
+  $('cron').checked = state.cross.on;
+  $('crcolor').value = state.cross.color;
+  $('crw').value = state.cross.w;
+  $('crwv').textContent = state.cross.w + 'px';
+  $('crArm').value = state.cross.arm;
+  $('crArmv').textContent = state.cross.arm > 0 ? (state.cross.arm + '%') : '贯穿';
+  $('crRot').value = state.cross.rot;
+  $('crRotv').textContent = Number(state.cross.rot).toFixed(1) + '°';
+  $('offx').value = state.off.x; $('offxv').textContent = state.off.x;
+  $('offy').value = state.off.y; $('offyv').textContent = state.off.y;
+  $('eccOn').checked = state.ecc.on;
+  $('zoom').value = state.view.zoom; $('zoomv').textContent = Number(state.view.zoom).toFixed(2) + '×';
+  $('bright').value = state.view.bright; $('brightv').textContent = Number(state.view.bright).toFixed(2);
+  $('contrast').value = state.view.contrast; $('contrastv').textContent = Number(state.view.contrast).toFixed(2);
+}
+
+function bindCtl(){
+  var i;
+  for(i = 0; i < 3; i++){
+    (function(i){
+      var on  = $('c' + (i+1) + 'on');
+      var col = $('c' + (i+1) + 'color');
+      var rg  = $('c' + (i+1) + 'r');
+      var vv  = $('c' + (i+1) + 'v');
+      on.addEventListener('change', function(){ state.circles[i].on = on.checked; save(); draw(); });
+      col.addEventListener('input', function(){ state.circles[i].color = col.value; save(); draw(); });
+      rg.addEventListener('input', function(){ state.circles[i].r = parseFloat(rg.value); vv.textContent = state.circles[i].r + '%'; save(); draw(); });
+    })(i);
+  }
+  $('cron').addEventListener('change', function(){ state.cross.on = this.checked; save(); draw(); });
+  $('crcolor').addEventListener('input', function(){ state.cross.color = this.value; save(); draw(); });
+  $('crw').addEventListener('input', function(){ state.cross.w = parseFloat(this.value); $('crwv').textContent = state.cross.w + 'px'; save(); draw(); });
+  $('crArm').addEventListener('input', function(){
+    state.cross.arm = parseFloat(this.value);
+    $('crArmv').textContent = state.cross.arm > 0 ? (state.cross.arm + '%') : '贯穿';
+    save(); draw();
+  });
+  $('crRot').addEventListener('input', function(){
+    state.cross.rot = parseFloat(this.value);
+    $('crRotv').textContent = state.cross.rot.toFixed(1) + '°';
+    save(); draw();
+  });
+  $('offx').addEventListener('input', function(){ state.off.x = parseFloat(this.value); $('offxv').textContent = this.value; save(); draw(); });
+  $('offy').addEventListener('input', function(){ state.off.y = parseFloat(this.value); $('offyv').textContent = this.value; save(); draw(); });
+  $('eccOn').addEventListener('change', function(){ state.ecc.on = this.checked; save(); draw(); updEccInfo(); });
+  $('bright').addEventListener('input', function(){ state.view.bright = parseFloat(this.value); $('brightv').textContent = Number(this.value).toFixed(2); save(); applyView(); });
+  $('contrast').addEventListener('input', function(){ state.view.contrast = parseFloat(this.value); $('contrastv').textContent = Number(this.value).toFixed(2); save(); applyView(); });
+  $('zoom').addEventListener('input', function(){
+    state.view.zoom = parseFloat(this.value);
+    $('zoomv').textContent = Number(state.view.zoom).toFixed(2) + '×';
+    save(); applyView(); fitOverlay();
+  });
+  $('resSelect').addEventListener('change', function(){ applyResolution(this.value); });
+}
+
+/* ---------------- 鼠标交互 ---------------- */
+var dragging = false, lastX = 0, lastY = 0;
+function bindStage(){
+  stage.addEventListener('pointerdown', function(e){
+    if(!stream || e.target === overlay){ return; }
+    dragging = true; lastX = e.clientX; lastY = e.clientY;
+    if(stage.setPointerCapture){ try{ stage.setPointerCapture(e.pointerId); }catch(err){} }
+  });
+  stage.addEventListener('pointermove', function(e){
+    if(!dragging){ return; }
+    var r = video.getBoundingClientRect();
+    if(r.width && r.height){
+      state.off.x = clamp(state.off.x + (e.clientX - lastX)/r.width*100, -50, 50);
+      state.off.y = clamp(state.off.y + (e.clientY - lastY)/r.height*100, -50, 50);
+      $('offx').value = state.off.x; $('offxv').textContent = state.off.x.toFixed(1);
+      $('offy').value = state.off.y; $('offyv').textContent = state.off.y.toFixed(1);
+    }
+    lastX = e.clientX; lastY = e.clientY;
+    save(); draw();
+  });
+  stage.addEventListener('pointerup', function(){ dragging = false; });
+  stage.addEventListener('pointercancel', function(){ dragging = false; });
+}
+
+/* ---------------- 存图 ---------------- */
+function snapshot(){
+  if(!stream || !video.videoWidth){ alert('先开启摄像头'); return; }
+  var vw = video.videoWidth, vh = video.videoHeight;
+  var z = clamp(state.view.zoom || 1, 1, 3);
+  var cw = vw / z, ch = vh / z;
+  var sx = (vw - cw) / 2, sy = (vh - ch) / 2;
+  var rot = ((state.view.rot % 360) + 360) % 360;
+  var swap = (rot === 90 || rot === 270);
+  var ow = swap ? ch : cw, oh = swap ? cw : ch;
+  var cv = document.createElement('canvas');
+  cv.width = ow; cv.height = oh;
+  var c2 = cv.getContext('2d');
+  try{ if('filter' in c2){ c2.filter = 'brightness(' + state.view.bright + ') contrast(' + state.view.contrast + ')'; } }catch(e){}
+  c2.save();
+  c2.translate(ow/2, oh/2);
+  c2.rotate(rot * Math.PI/180);
+  if(state.view.flip){ c2.scale(-1, 1); }
+  c2.drawImage(video, sx, sy, cw, ch, -cw/2, -ch/2, cw, ch);
+  c2.restore();
+  drawOverlay(c2, ow * z, oh * z);
+  var a = document.createElement('a');
+  a.download = 'collimation_' + Date.now() + '.png';
+  a.href = cv.toDataURL('image/png');
+  a.click();
+}
+
+/* ---------------- 初始化 ---------------- */
+function init(){
+  load();
+  bindCtl();
+  setCtlValues();
+  bindStage();
+  applyView();
+  $('btnStart').addEventListener('click', function(){ start(null); });
+  $('camSelect').addEventListener('change', function(){ if(this.value){ start(this.value); } });
+  $('btnFull').addEventListener('click', function(){
+    if(document.fullscreenElement){ document.exitFullscreen(); }
+    else if(stage.requestFullscreen){ stage.requestFullscreen(); }
+  });
+  $('btnShot').addEventListener('click', snapshot);
+  $('btnRot').addEventListener('click', function(){ state.view.rot = (state.view.rot + 90) % 360; save(); applyView(); fitOverlay(); });
+  $('btnFlip').addEventListener('click', function(){ state.view.flip = !state.view.flip; save(); applyView(); });
+  $('btnReset').addEventListener('click', function(){
+    state = freshState(); save(); setCtlValues(); applyView(); fitOverlay(); updEccInfo();
+  });
+  video.addEventListener('loadedmetadata', function(){
+    $('devInfo').textContent = video.videoWidth + '×' + video.videoHeight;
+    fitOverlay();
+  });
+  video.addEventListener('resize', function(){
+    $('devInfo').textContent = video.videoWidth + '×' + video.videoHeight;
+    fitOverlay();
+  });
+  window.addEventListener('resize', fitOverlay);
+  document.addEventListener('fullscreenchange', function(){ setTimeout(fitOverlay, 80); });
+  if(window.ResizeObserver){ new ResizeObserver(function(){ fitOverlay(); }).observe(stage); }
+  if(navigator.mediaDevices && navigator.mediaDevices.addEventListener){
+    navigator.mediaDevices.addEventListener('devicechange', function(){ refreshList(); });
+  }
+  setInterval(function(){ sampleEcc(); }, 400);
+  loop();
+}
+
+init();
+})();
+</script>
+</body>
+</html>
