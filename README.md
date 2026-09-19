@@ -4,7 +4,7 @@
 
 ## 在线使用
 
-打开 https://l1vesong.github.io/ocal-viewer/ （任意浏览器；iPad 建议用 Safari）
+打开 https://l1vesong.github.io/collimation-viewer/ （任意浏览器；iPad 建议用 Safari）
 
 - Mac 用户：也可使用桌面版（本地服务 + 双击即用的应用外壳）
 - iPad（USB-C / iPadOS 17+）：Safari 打开本页 → 分享 → 添加到主屏幕，可全屏当 App 使用
